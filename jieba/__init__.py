@@ -1,5 +1,5 @@
 from __future__ import absolute_import, unicode_literals
-__version__ = '0.39'
+__version__ = '0.38'
 __license__ = 'MIT'
 
 import re
@@ -7,13 +7,12 @@ import os
 import sys
 import time
 import logging
-import pickle
+import marshal
 import tempfile
 import threading
 from math import log
 from hashlib import md5
 from ._compat import *
-from ._dict import CaseInsensitiveDict
 from . import finalseg
 
 if os.name == 'nt':
@@ -35,15 +34,13 @@ DICT_WRITING = {}
 
 pool = None
 
-case_sensitive = False
-
 re_userdict = re.compile('^(.+?)( [0-9]+)?( [a-z]+)?$', re.U)
 
 re_eng = re.compile('[a-zA-Z0-9]', re.U)
 
 # \u4E00-\u9FD5a-zA-Z0-9+#&\._ : All non-space characters. Will be handled with re_han
 # \r\n|\s : whitespace characters. Will not be handled.
-re_han_default = re.compile("([\u4E00-\u9FD5a-zA-Z0-9+#&\._%]+)", re.U)
+re_han_default = re.compile("([\u4E00-\u9FD5a-zA-Z0-9+#&\._]+)", re.U)
 re_skip_default = re.compile("(\r\n|\s)", re.U)
 re_han_cut_all = re.compile("([\u4E00-\u9FD5]+)", re.U)
 re_skip_cut_all = re.compile("[^a-zA-Z0-9+#\n]", re.U)
@@ -60,8 +57,7 @@ class Tokenizer(object):
             self.dictionary = dictionary
         else:
             self.dictionary = _get_abs_path(dictionary)
-
-        self.FREQ = self._create_dict()
+        self.FREQ = {}
         self.total = 0
         self.user_word_tag_tab = {}
         self.initialized = False
@@ -71,14 +67,8 @@ class Tokenizer(object):
     def __repr__(self):
         return '<Tokenizer dictionary=%r>' % self.dictionary
 
-    def _create_dict(self):
-        if case_sensitive:
-            return {}
-        else:
-            return CaseInsensitiveDict()
-
     def gen_pfdict(self, f):
-        lfreq = self._create_dict()
+        lfreq = {}
         ltotal = 0
         f_name = resolve_filename(f)
         for lineno, line in enumerate(f, 1):
@@ -141,7 +131,7 @@ class Tokenizer(object):
                     "Loading model from cache %s" % cache_file)
                 try:
                     with open(cache_file, 'rb') as cf:
-                        self.FREQ, self.total = pickle.load(cf)
+                        self.FREQ, self.total = marshal.load(cf)
                     load_from_cache_fail = False
                 except Exception:
                     load_from_cache_fail = True
@@ -157,7 +147,7 @@ class Tokenizer(object):
                         # prevent moving across different filesystems
                         fd, fpath = tempfile.mkstemp(dir=tmpdir)
                         with os.fdopen(fd, 'wb') as temp_cache_file:
-                            pickle.dump(
+                            marshal.dump(
                                 (self.FREQ, self.total), temp_cache_file)
                         _replace_file(fpath, cache_file)
                     except Exception:
@@ -419,8 +409,6 @@ class Tokenizer(object):
             wfrag = word[:ch + 1]
             if wfrag not in self.FREQ:
                 self.FREQ[wfrag] = 0
-        if freq == 0:
-            finalseg.add_force_split(word)
 
     def del_word(self, word):
         """
@@ -531,10 +519,6 @@ def _lcut_all(s):
 
 def _lcut(s):
     return dt._lcut(s)
-
-
-def _lcut_no_hmm(s):
-    return dt._lcut_no_hmm(s)
 
 
 def _lcut_all(s):
